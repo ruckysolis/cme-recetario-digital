@@ -6,7 +6,7 @@ import datetime
 import random
 import string
 from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable, Image
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from reportlab.lib.units import inch
@@ -44,10 +44,23 @@ def init_db():
         institucion_especialidad TEXT,
         domicilio_consultorio TEXT NOT NULL,
         telefono TEXT,
-        correo TEXT
+        correo TEXT,
+        color_primario TEXT DEFAULT '#003366',
+        color_secundario TEXT DEFAULT '#444444',
+        logo_path TEXT DEFAULT 'consultorio_logo.png'
     )
     """)
     
+    # Robustez: Verificar si las columnas de personalización de estilo existen (migración de DB en caliente)
+    cursor.execute("PRAGMA table_info(medicos)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if 'color_primario' not in columns:
+        cursor.execute("ALTER TABLE medicos ADD COLUMN color_primario TEXT DEFAULT '#003366'")
+    if 'color_secundario' not in columns:
+        cursor.execute("ALTER TABLE medicos ADD COLUMN color_secundario TEXT DEFAULT '#444444'")
+    if 'logo_path' not in columns:
+        cursor.execute("ALTER TABLE medicos ADD COLUMN logo_path TEXT DEFAULT 'consultorio_logo.png'")
+        
     # Tabla de Pacientes (Cumple Art 247 LGS - CURP)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS pacientes (
@@ -132,11 +145,13 @@ def init_db():
         INSERT INTO medicos (
             nombre_completo, cedula_profesional, institucion_titulo, 
             tiene_especialidad, especialidad, cedula_especialidad, 
-            institucion_especialidad, domicilio_consultorio, telefono, correo
+            institucion_especialidad, domicilio_consultorio, telefono, correo,
+            color_primario, color_secundario, logo_path
         ) VALUES (
             'Dra. María Elisa Gómez Pérez', '12345678', 'Universidad Nacional Autónoma de México',
             1, 'Medicina Familiar', '98765432', 'Consejo Mexicano de Medicina Familiar',
-            'Av. Insurgentes Sur 1458, Col. Del Valle, Benito Juárez, CDMX, CP 03100', '55-5555-5555', 'dra.elisa@mail.com'
+            'Av. Insurgentes Sur 1458, Col. Del Valle, Benito Juárez, CDMX, CP 03100', '55-5555-5555', 'dra.elisa@mail.com',
+            '#003366', '#444444', 'consultorio_logo.png'
         )
         """)
         id_medico = cursor.lastrowid
@@ -198,7 +213,7 @@ def calcular_imc(peso, talla):
         return imc, clasif, color
     return None, None, None
 
-# --- 3. GENERADOR DE PDF (REPORTLAB) ---
+# --- 3. GENERADOR DE PDF (REPORTLAB CON LOGO Y COLORES) ---
 def generar_pdf_receta(medico, paciente, folio, fecha, medicamentos):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -210,25 +225,29 @@ def generar_pdf_receta(medico, paciente, folio, fecha, medicamentos):
     
     styles = getSampleStyleSheet()
     
-    # Estilos personalizados
+    # Colores personalizados cargados de la base de datos (con fallback seguro)
+    col_primario = medico.get('color_primario', '#003366')
+    col_secundario = medico.get('color_secundario', '#444444')
+    
+    # Estilos personalizados para el PDF
     style_titulo_doctor = ParagraphStyle(
         'DocTitle',
         parent=styles['Normal'],
         fontName='Helvetica-Bold',
-        fontSize=16,
-        leading=20,
-        textColor=colors.HexColor('#003366'),
-        alignment=1 # Centrado
+        fontSize=15,
+        leading=18,
+        textColor=colors.HexColor(col_primario),
+        alignment=0 # Alineado a la izquierda para acomodarse con el logo
     )
     
     style_subtitulo_doctor = ParagraphStyle(
         'DocSub',
         parent=styles['Normal'],
         fontName='Helvetica',
-        fontSize=10,
-        leading=14,
-        textColor=colors.HexColor('#444444'),
-        alignment=1 # Centrado
+        fontSize=9,
+        leading=13,
+        textColor=colors.HexColor(col_secundario),
+        alignment=0 # Alineado a la izquierda
     )
     
     style_cuerpo = ParagraphStyle(
@@ -246,7 +265,7 @@ def generar_pdf_receta(medico, paciente, folio, fecha, medicamentos):
         fontName='Helvetica-Bold',
         fontSize=11,
         leading=15,
-        textColor=colors.HexColor('#003366')
+        textColor=colors.HexColor(col_primario)
     )
     
     style_medicamento_com = ParagraphStyle(
@@ -260,20 +279,57 @@ def generar_pdf_receta(medico, paciente, folio, fecha, medicamentos):
 
     story = []
     
-    # ENCABEZADO MÉDICO (Art 29 RIS & Art 83 LGS)
-    story.append(Paragraph(medico['nombre_completo'].upper(), style_titulo_doctor))
+    # --- PROCESAMIENTO DEL LOGOTIPO ---
+    logo_path = medico.get('logo_path', 'consultorio_logo.png')
+    resolved_logo_path = None
     
-    if medico['tiene_especialidad']:
+    # Buscamos de forma robusta la imagen en múltiples directorios posibles
+    if logo_path:
+        for p in [logo_path, os.path.join('/workspace/artifacts', logo_path), os.path.join('.', logo_path)]:
+            if os.path.exists(p):
+                resolved_logo_path = p
+                break
+
+    header_text_story = []
+    header_text_story.append(Paragraph(f"<b>{medico['nombre_completo'].upper()}</b>", style_titulo_doctor))
+    
+    if medico['tiene_especialidad'] and medico['especialidad']:
         especialidad_texto = f"Especialista en: {medico['especialidad']}<br/>Ced. Especialidad: {medico['cedula_especialidad']} por {medico['institucion_especialidad']}"
-        story.append(Paragraph(especialidad_texto, style_subtitulo_doctor))
+        header_text_story.append(Paragraph(especialidad_texto, style_subtitulo_doctor))
     else:
-        story.append(Paragraph("Médico General", style_subtitulo_doctor))
+        header_text_story.append(Paragraph("Médico General", style_subtitulo_doctor))
         
     titulo_prof = f"Título expedido por: {medico['institucion_titulo']} | Cédula Profesional: {medico['cedula_profesional']}"
-    story.append(Spacer(1, 4))
-    story.append(Paragraph(titulo_prof, style_subtitulo_doctor))
+    header_text_story.append(Paragraph(titulo_prof, style_subtitulo_doctor))
+    
+    # Si existe el logotipo, creamos una tabla estructurada para el membrete
+    if resolved_logo_path:
+        try:
+            # Creamos el elemento Image ajustado a 1.2 x 1.2 pulgadas
+            logo_img = Image(resolved_logo_path, width=1.1*inch, height=1.1*inch)
+            
+            # Tabla: [Imagen_Logo, Textos_Médicos]
+            header_table_data = [[logo_img, header_text_story]]
+            header_table = Table(header_table_data, colWidths=[1.3*inch, 5.7*inch])
+            header_table.setStyle(TableStyle([
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ('LEFTPADDING', (1,0), (1,0), 10),
+                ('RIGHTPADDING', (0,0), (-1,-1), 0),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 0),
+                ('TOPPADDING', (0,0), (-1,-1), 0),
+            ]))
+            story.append(header_table)
+        except Exception:
+            # Fallback seguro por si falla la carga de imagen por librerías del sistema
+            story.extend(header_text_story)
+    else:
+        # Si no hay logotipo, usamos el texto de encabezado centrado clásico
+        style_titulo_doctor.alignment = 1 # Centrado
+        style_subtitulo_doctor.alignment = 1 # Centrado
+        story.extend(header_text_story)
+        
     story.append(Spacer(1, 10))
-    story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#003366'), spaceAfter=15))
+    story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor(col_primario), spaceAfter=15))
     
     # INFORMACIÓN DE LA CONSULTA (Paciente, Fecha, Folio)
     info_consulta_data = [
@@ -293,11 +349,11 @@ def generar_pdf_receta(medico, paciente, folio, fecha, medicamentos):
         ('TOPPADDING', (0,0), (-1,-1), 4),
     ]))
     story.append(t_info)
-    story.append(Spacer(1, 15))
+    story.append(Spacer(1, 10))
     story.append(HRFlowable(width="100%", thickness=0.8, color=colors.HexColor('#CCCCCC'), spaceAfter=15))
     
     # CUERPO DE LA RECETA - PRESCRIPCIÓN (Art 30 & 31 RIS)
-    story.append(Paragraph("<b>Rx - PRESCRIPCIÓN</b>", ParagraphStyle('Rx', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=12, textColor=colors.HexColor('#003366'), spaceAfter=10)))
+    story.append(Paragraph("<b>Rx - PRESCRIPCIÓN</b>", ParagraphStyle('Rx', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=12, textColor=colors.HexColor(col_primario), spaceAfter=10)))
     story.append(Spacer(1, 5))
     
     for idx, med in enumerate(medicamentos, 1):
@@ -324,17 +380,20 @@ def generar_pdf_receta(medico, paciente, folio, fecha, medicamentos):
         
     story.append(Spacer(1, 30))
     
-    # PIE DE PÁGINA (Firma, Domicilio Consultorio)
+    # PIE DE PÁGINA (Línea de Firma y Dirección del Consultorio)
     story.append(Spacer(1, 40))
     story.append(HRFlowable(width="40%", thickness=1, color=colors.black, hAlign='CENTER', spaceAfter=5))
-    story.append(Paragraph("Firma del Médico Prescriptor", style_subtitulo_doctor))
-    story.append(Spacer(1, 20))
     
-    # Dirección del consultorio obligatoria en papelería impresa
+    # Re-centramos el texto del pie de firma
+    style_subtitulo_doctor_center = ParagraphStyle('CenterFooter', parent=style_subtitulo_doctor, alignment=1)
+    story.append(Paragraph("Firma del Médico Prescriptor", style_subtitulo_doctor_center))
+    story.append(Spacer(1, 15))
+    
+    # Dirección del consultorio obligatoria en papelería impresa (Art. 83 LGS / 29 RIS)
     story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#CCCCCC'), spaceAfter=10))
     direccion_texto = f"<b>Consultorio:</b> {medico['domicilio_consultorio']}<br/>" \
                       f"Teléfono: {medico['telefono']} | Correo Electrónico: {medico['correo']}"
-    story.append(Paragraph(direccion_texto, style_subtitulo_doctor))
+    story.append(Paragraph(direccion_texto, style_subtitulo_doctor_center))
     
     doc.build(story)
     buffer.seek(0)
@@ -379,14 +438,14 @@ else:
     user_info = st.session_state['user_info']
     id_medico = user_info['id_medico']
     
-    # Obtener datos del médico logueado
+    # Obtener datos actualizados del médico logueado
     conn = get_db_connection()
     medico_db = conn.execute("SELECT * FROM medicos WHERE id = ?", (id_medico,)).fetchone()
     medico = dict(medico_db) if medico_db else {}
     conn.close()
 
     # Sidebar de Navegación
-    st.sidebar.markdown(f"<h3 style='color: #003366;'>👩‍⚕️ Bienvenida, {medico.get('nombre_completo')}</h3>", unsafe_allow_html=True)
+    st.sidebar.markdown(f"<h3 style='color: {medico.get('color_primario', '#003366')};'>👩‍⚕️ Bienvenida, {medico.get('nombre_completo')}</h3>", unsafe_allow_html=True)
     st.sidebar.caption(f"Cédula: {medico.get('cedula_profesional')}")
     st.sidebar.divider()
     
@@ -406,14 +465,14 @@ else:
         st.session_state['user_info'] = None
         st.rerun()
         
-    st.sidebar.caption("🩺 Plataforma de Expediente Clínico v3.0")
+    st.sidebar.caption("🩺 Plataforma de Expediente Clínico v4.0")
 
     # --- TAB: CONFIGURACIÓN MÉDICA ---
     if choice == "Configuración Médica":
         st.header("⚙️ Configuración del Perfil Médico")
         st.write("Mantén tus datos actualizados. La Ley General de Salud exige que tu cédula, universidad y dirección de consultorio estén visibles en toda receta.")
         
-        tab_perfil, tab_seguridad = st.tabs(["Perfil Profesional", "Seguridad de Acceso"])
+        tab_perfil, tab_seguridad, tab_estilo = st.tabs(["Perfil Profesional", "Seguridad de Acceso", "🎨 Estilo y Personalización"])
         
         with tab_perfil:
             with st.form("perfil_medico_form"):
@@ -480,6 +539,98 @@ else:
                             conn.commit()
                             conn.close()
                             st.success("¡Tu contraseña ha sido actualizada con éxito!")
+                            
+        with tab_estilo:
+            st.subheader("🎨 Personalización de Marca y Colores")
+            st.write("Configura de manera amigable la identidad visual de las recetas impresas en PDF.")
+            
+            # Paletas predefinidas para facilitar la selección a la doctora
+            paletas = {
+                "Azul Clínico (Predeterminado)": ("#003366", "#444444"),
+                "Verde Sanitario (Clásico)": ("#005B54", "#2E403F"),
+                "Gris Elegante (Charcoal)": ("#2C3E50", "#5D6D7E"),
+                "Rojo Salud (Cruz Roja)": ("#990000", "#501212")
+            }
+            
+            current_primary = medico.get('color_primario', '#003366')
+            current_secondary = medico.get('color_secundario', '#444444')
+            
+            # Detectar si los colores actuales coinciden con alguna paleta predefinida
+            match_palette = "Personalizado"
+            for name, colors_tup in paletas.items():
+                if colors_tup[0].upper() == current_primary.upper() and colors_tup[1].upper() == current_secondary.upper():
+                    match_palette = name
+                    break
+            
+            select_paleta = st.selectbox(
+                "Selecciona una paleta de colores predeterminada:",
+                list(paletas.keys()) + ["Personalizado"],
+                index=list(paletas.keys()).index(match_palette) if match_palette in paletas else len(paletas)
+            )
+            
+            # Si eligen una predefinida, actualizamos las variables
+            if select_paleta != "Personalizado":
+                prim_col, sec_col = paletas[select_paleta]
+            else:
+                prim_col = current_primary
+                sec_col = current_secondary
+            
+            col_c1, col_c2 = st.columns(2)
+            with col_c1:
+                color_p = st.color_picker("Color Primario (Títulos y Medicamentos):", value=prim_col)
+            with col_c2:
+                color_s = st.color_picker("Color Secundario (Subtítulos e Información):", value=sec_col)
+            
+            st.markdown("---")
+            st.write("##### 🖼️ Logotipo de la Receta")
+            
+            # Buscar el logotipo de forma local
+            logo_path_current = medico.get('logo_path', 'consultorio_logo.png')
+            resolved_logo = None
+            if logo_path_current:
+                for p in [logo_path_current, os.path.join('/workspace/artifacts', logo_path_current), os.path.join('.', logo_path_current)]:
+                    if os.path.exists(p):
+                        resolved_logo = p
+                        break
+            
+            if resolved_logo:
+                st.image(resolved_logo, width=120, caption="Logotipo actual que aparecerá en tus recetas PDF")
+            else:
+                st.warning("⚠️ No se ha detectado el logotipo predeterminado. La receta se generará con un diseño elegante de solo texto.")
+                
+            uploaded_logo = st.file_uploader("Sube un nuevo logotipo personalizado (Formatos PNG o JPG recomendados de 1:1 ratio):", type=["png", "jpg", "jpeg"])
+            
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                if st.button("💾 Guardar Cambios de Estilo", type="primary"):
+                    new_logo_path = logo_path_current
+                    if uploaded_logo is not None:
+                        # Guardamos el logotipo subido localmente en la app
+                        new_logo_path = "logo_personalizado.png"
+                        with open(new_logo_path, "wb") as f:
+                            f.write(uploaded_logo.getbuffer())
+                    
+                    conn = get_db_connection()
+                    conn.execute("""
+                        UPDATE medicos SET 
+                            color_primario = ?, color_secundario = ?, logo_path = ?
+                        WHERE id = ?
+                    """, (color_p, color_s, new_logo_path, id_medico))
+                    conn.commit()
+                    conn.close()
+                    st.success("¡Estilos visuales de tu receta actualizados con éxito!")
+                    st.rerun()
+            with col_btn2:
+                if st.button("🔄 Restaurar Logo Predeterminado"):
+                    conn = get_db_connection()
+                    conn.execute("""
+                        UPDATE medicos SET logo_path = 'consultorio_logo.png'
+                        WHERE id = ?
+                    """, (id_medico,))
+                    conn.commit()
+                    conn.close()
+                    st.info("Logotipo predeterminado restaurado.")
+                    st.rerun()
 
     # --- TAB: ADMINISTRAR PACIENTES ---
     elif choice == "Administrar Pacientes":
@@ -619,7 +770,7 @@ else:
                                 'dosis': m_dosis.strip(),
                                 'via_administracion': m_via,
                                 'frecuencia': m_frecuencia.strip(),
-                                'duracion_tratamiento': m_duracion.strip(),
+                                'duracion_treatment': m_duracion.strip(),
                                 'indicaciones_adicionales': m_adicional.strip() if m_adicional else None
                             })
                             st.success(f"Se agregó '{m_generico}' a la receta actual.")
@@ -631,7 +782,7 @@ else:
                     for i, med in enumerate(st.session_state['medicamentos_receta'], 1):
                         marca = f" ({med['denominacion_distintiva']})" if med['denominacion_distintiva'] else ""
                         st.markdown(f"**{i}. {med['denominacion_generica']}{marca}** - {med['presentacion']}")
-                        st.caption(f"Dosis: {med['dosis']} | Vía: {med['via_administracion']} | Frecuencia: {med['frecuencia']} | Duración: {med['duracion_tratamiento']}")
+                        st.caption(f"Dosis: {med['dosis']} | Vía: {med['via_administracion']} | Frecuencia: {med['frecuencia']} | Duración: {med['duracion_treatment']}")
                     
                     if st.button("❌ Vaciar Lista de Medicamentos"):
                         st.session_state['medicamentos_receta'] = []
@@ -676,7 +827,7 @@ else:
                             """, (
                                 id_receta, med['denominacion_generica'], med['denominacion_distintiva'],
                                 med['presentacion'], med['dosis'], med['via_administracion'],
-                                med['frecuencia'], med['duracion_tratamiento'], med['indicaciones_adicionales']
+                                med['frecuencia'], med['duracion_treatment'], med['indicaciones_adicionales']
                             ))
                     
                     # 2. Insertar Consulta
@@ -709,7 +860,7 @@ else:
                     time.sleep(1.5)
                     st.rerun()
 
-    # --- NUEVO TAB: EXPEDIENTE CLÍNICO COMPLETO ---
+    # --- TAB: EXPEDIENTE CLÍNICO COMPLETO ---
     elif choice == "Expediente Clínico":
         st.header("🗂️ Expediente Clínico de Pacientes (Historial de Consultas)")
         st.write("Consulta y audita el historial clínico completo del paciente, sus signos vitales históricos y tratamientos prescritos.")
@@ -731,7 +882,7 @@ else:
             # Mostrar Resumen Ficha Identificación
             col_ficha1, col_ficha2 = st.columns(2)
             with col_ficha1:
-                st.markdown(f"#### 👤 Ficha de Identificación del Paciente")
+                st.markdown("#### 👤 Ficha de Identificación del Paciente")
                 st.write(f"**Nombre:** {paciente['nombre_completo']}")
                 st.write(f"**CURP:** {paciente['curp']}")
                 st.write(f"**Edad:** {calcular_edad(paciente['fecha_nacimiento'])} ({paciente['fecha_nacimiento']})")
@@ -773,7 +924,7 @@ else:
                                 st.info(cons['plan_tratamiento'])
                                 
                         with col_cons2:
-                            st.markdown("**🩺 Exploración Física y Vitales:**")
+                            st.markdown("**💡 Exploración Física y Vitales:**")
                             st.write(f"- **Peso:** {cons['peso']} kg  |  **Talla:** {cons['talla']} m")
                             
                             # Recalcular IMC histórico
@@ -787,7 +938,7 @@ else:
                             st.write(f"- **Temperatura:** {cons['temperatura']} °C")
                             st.write(f"- **Frecuencia Cardíaca:** {cons['frecuencia_cardiaca']} lpm")
                             
-                        # Si la consulta tiene una receta asociada, permitir visualizarla y descargarla
+                        # Si la consulta tiene una receta asociada, permitir descargarla
                         if cons['id_receta']:
                             st.divider()
                             st.markdown("##### 💊 Receta Médica Emitida en esta Consulta")
