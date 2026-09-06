@@ -416,7 +416,7 @@ if not st.session_state['logged_in']:
         
         with st.form("login_form"):
             username = st.text_input("Usuario", placeholder="Ingresa tu nombre de usuario")
-            password = st.password_input("Contraseña", placeholder="Ingresa tu contraseña")
+            password = st.text_input("Contraseña", type="password", placeholder="Ingresa tu contraseña")
             submit_login = st.form_submit_button("Iniciar Sesión")
             
             if submit_login:
