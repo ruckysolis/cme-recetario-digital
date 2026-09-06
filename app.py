@@ -11,6 +11,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from reportlab.lib.units import inch
 import io
+from zoneinfo import ZoneInfo
 
 # Configuración de página de Streamlit
 st.set_page_config(
@@ -908,14 +909,14 @@ else:
                 else:
                     conn = get_db_connection()
                     cursor = conn.cursor()
-                    fecha_hoy = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                    fecha_hoy = datetime.datetime.now(ZoneInfo("America/Monterrey")).strftime("%Y-%m-%d %H:%M")
                     id_receta = None
                     
                     # 1. Si lleva receta, la registramos primero
                     if generar_receta and st.session_state['medicamentos_receta']:
                         # Generar Folio Único
                         random_suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
-                        folio = f"REC-{datetime.datetime.now().strftime('%Y%m%d')}-{random_suffix}"
+                        folio = f"REC-{datetime.datetime.now(ZoneInfo('America/Monterrey')).strftime('%Y%m%d')}-{random_suffix}"
                         
                         cursor.execute("""
                         INSERT INTO recetas (id_medico, id_paciente, fecha_emision, folio)
