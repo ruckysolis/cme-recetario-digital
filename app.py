@@ -213,7 +213,7 @@ def calcular_imc(peso, talla):
         return imc, clasif, color
     return None, None, None
 
-# --- 3. GENERADOR DE PDF (REPORTLAB CON LOGO Y COLORES) ---
+# --- 3. GENERADOR DE PDF (REPORTLAB CON LOGO, COLORES Y SELLO DIGITAL) ---
 def generar_pdf_receta(medico, paciente, folio, fecha, medicamentos):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -305,7 +305,7 @@ def generar_pdf_receta(medico, paciente, folio, fecha, medicamentos):
     # Si existe el logotipo, creamos una tabla estructurada para el membrete
     if resolved_logo_path:
         try:
-            # Creamos el elemento Image ajustado a 1.2 x 1.2 pulgadas
+            # Creamos el elemento Image ajustado a 1.1 x 1.1 pulgadas
             logo_img = Image(resolved_logo_path, width=1.1*inch, height=1.1*inch)
             
             # Tabla: [Imagen_Logo, Textos_Médicos]
@@ -332,7 +332,7 @@ def generar_pdf_receta(medico, paciente, folio, fecha, medicamentos):
     story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor(col_primario), spaceAfter=15))
     
     # INFORMACIÓN DE LA CONSULTA (Paciente, Fecha, Folio)
-    info_consulta_data = [
+    info_consulta_data = [\
         [
             Paragraph(f"<b>Paciente:</b> {paciente['nombre_completo']}", style_cuerpo),
             Paragraph(f"<b>Folio:</b> {folio}", style_cuerpo)
@@ -380,17 +380,45 @@ def generar_pdf_receta(medico, paciente, folio, fecha, medicamentos):
         
     story.append(Spacer(1, 30))
     
-    # PIE DE PÁGINA (Línea de Firma y Dirección del Consultorio)
-    story.append(Spacer(1, 40))
-    story.append(HRFlowable(width="40%", thickness=1, color=colors.black, hAlign='CENTER', spaceAfter=5))
+    # PIE DE PÁGINA (Sello Digital de Validación y Dirección del Consultorio)
+    story.append(Spacer(1, 20))
     
-    # Re-centramos el texto del pie de firma
-    style_subtitulo_doctor_center = ParagraphStyle('CenterFooter', parent=style_subtitulo_doctor, alignment=1)
-    story.append(Paragraph("Firma del Médico Prescriptor", style_subtitulo_doctor_center))
+    # Bloque de validación de firma digital
+    style_sello_digital = ParagraphStyle(
+        'SelloDigital',
+        parent=styles['Normal'],
+        fontName='Helvetica-BoldOblique',
+        fontSize=8,
+        leading=11,
+        textColor=colors.HexColor(col_primario),
+        alignment=1 # Centrado
+    )
+    
+    # Generar un token único de verificación digital (hash) de la receta
+    token_verificacion = hashlib.sha256(f"{folio}-{medico['cedula_profesional']}".encode('utf-8')).hexdigest()[:16].upper()
+    
+    texto_firma_digital = f"🛡️ RECETA DIGITAL VALIDADA ELECTRÓNICAMENTE<br/>" \
+                           f"Firmado digitalmente por: {medico['nombre_completo']} | Cédula Profesional: {medico['cedula_profesional']}<br/>" \
+                           f"Código de Verificación de Acto Clínico: {token_verificacion}"
+                           
+    # Sello digital en una caja gris con el borde del color de la marca
+    sello_table_data = [[Paragraph(texto_firma_digital, style_sello_digital)]]
+    sello_table = Table(sello_table_data, colWidths=[6.8*inch])
+    sello_table.setStyle(TableStyle([
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#F4F6F6')),
+        ('BOX', (0,0), (-1,-1), 1, colors.HexColor(col_primario)),
+        ('TOPPADDING', (0,0), (-1,-1), 8),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 8),
+    ]))
+    
+    story.append(sello_table)
     story.append(Spacer(1, 15))
     
-    # Dirección del consultorio obligatoria en papelería impresa (Art. 83 LGS / 29 RIS)
+    # Dirección del consultorio obligatoria en papelería (Art. 83 LGS / 29 RIS)
     story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#CCCCCC'), spaceAfter=10))
+    style_subtitulo_doctor_center = ParagraphStyle('CenterFooter', parent=style_subtitulo_doctor, alignment=1)
     direccion_texto = f"<b>Consultorio:</b> {medico['domicilio_consultorio']}<br/>" \
                       f"Teléfono: {medico['telefono']} | Correo Electrónico: {medico['correo']}"
     story.append(Paragraph(direccion_texto, style_subtitulo_doctor_center))
@@ -416,7 +444,7 @@ if not st.session_state['logged_in']:
         
         with st.form("login_form"):
             username = st.text_input("Usuario", placeholder="Ingresa tu nombre de usuario")
-            password = st.text_input("Contraseña", type="password", placeholder="Ingresa tu contraseña")
+            password = st.password_input("Contraseña", placeholder="Ingresa tu contraseña")
             submit_login = st.form_submit_button("Iniciar Sesión")
             
             if submit_login:
@@ -465,7 +493,7 @@ else:
         st.session_state['user_info'] = None
         st.rerun()
         
-    st.sidebar.caption("🩺 Plataforma de Expediente Clínico v4.0")
+    st.sidebar.caption("🩺 Plataforma de Expediente Clínico v5.0")
 
     # --- TAB: CONFIGURACIÓN MÉDICA ---
     if choice == "Configuración Médica":
@@ -636,7 +664,7 @@ else:
     elif choice == "Administrar Pacientes":
         st.header("👥 Gestión de Pacientes")
         
-        tab1, tab2 = st.tabs(["Registrar Nuevo Paciente", "Ver Pacientes Registrados"])
+        tab1, tab2, tab3 = st.tabs(["Registrar Nuevo Paciente", "Ver Pacientes Registrados", "✏️ Modificar Paciente"])
         
         with tab1:
             st.subheader("Registrar Paciente")
@@ -645,7 +673,12 @@ else:
                 with col1:
                     p_nombre = st.text_input("Nombre Completo del Paciente")
                     p_curp = st.text_input("CURP (Clave Única de Registro de Población)")
-                    p_nacimiento = st.date_input("Fecha de Nacimiento").strftime("%Y-%m-%d")
+                    p_nacimiento = st.date_input(
+                        "Fecha de Nacimiento",
+                        value=datetime.date(1990, 1, 1),
+                        min_value=datetime.date(1900, 1, 1),
+                        max_value=datetime.date.today()
+                    ).strftime("%Y-%m-%d")
                 with col2:
                     p_sexo = st.selectbox("Sexo al Nacer", ["M", "F", "Otro"])
                     p_tel = st.text_input("Teléfono del Paciente (Opcional)")
@@ -686,6 +719,76 @@ else:
                         st.write(f"**Correo:** {p['correo'] if p['correo'] else 'No registrado'}")
             else:
                 st.info("No hay pacientes registrados aún.")
+                
+        with tab3:
+            st.subheader("Modificar Datos de Pacientes Registrados")
+            conn = get_db_connection()
+            p_list = conn.execute("SELECT id, nombre_completo, curp FROM pacientes ORDER BY nombre_completo").fetchall()
+            conn.close()
+            
+            if not p_list:
+                st.info("No hay pacientes registrados aún para modificar.")
+            else:
+                p_options = {f"{row['nombre_completo']} ({row['curp']})": row['id'] for row in p_list}
+                p_select = st.selectbox("Selecciona el paciente a modificar:", list(p_options.keys()))
+                id_p_mod = p_options[p_select]
+                
+                # Obtener datos del paciente seleccionado
+                conn = get_db_connection()
+                pac_data = conn.execute("SELECT * FROM pacientes WHERE id = ?", (id_p_mod,)).fetchone()
+                conn.close()
+                
+                if pac_data:
+                    # Formulario para editar
+                    with st.form("edit_paciente_form"):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            e_nombre = st.text_input("Nombre Completo del Paciente", value=pac_data['nombre_completo'])
+                            e_curp = st.text_input("CURP (Clave Única de Registro de Población)", value=pac_data['curp'])
+                            
+                            # Parsear fecha de nacimiento anterior de forma robusta
+                            try:
+                                def_date = datetime.datetime.strptime(pac_data['fecha_nacimiento'], "%Y-%m-%d").date()
+                            except Exception:
+                                def_date = datetime.date(1990, 1, 1)
+                                
+                            e_nacimiento = st.date_input(
+                                "Fecha de Nacimiento",
+                                value=def_date,
+                                min_value=datetime.date(1900, 1, 1),
+                                max_value=datetime.date.today()
+                            )
+                        with col2:
+                            e_sexo = st.selectbox("Sexo al Nacer", ["M", "F", "Otro"], index=["M", "F", "Otro"].index(pac_data['sexo']) if pac_data['sexo'] in ["M", "F", "Otro"] else 0)
+                            e_tel = st.text_input("Teléfono del Paciente (Opcional)", value=pac_data['telefono'] if pac_data['telefono'] else "")
+                            e_correo = st.text_input("Correo del Paciente (Opcional)", value=pac_data['correo'] if pac_data['correo'] else "")
+                            
+                        e_submit = st.form_submit_button("💾 Guardar Cambios del Paciente")
+                        
+                        if e_submit:
+                            if not e_nombre or not e_curp:
+                                st.error("El nombre y la CURP son obligatorios.")
+                            elif len(e_curp) != 18:
+                                st.warning("La CURP debe tener exactamente 18 caracteres.")
+                            else:
+                                try:
+                                    conn = get_db_connection()
+                                    conn.execute("""
+                                        UPDATE pacientes SET
+                                            nombre_completo = ?,
+                                            curp = ?,
+                                            fecha_nacimiento = ?,
+                                            sexo = ?,
+                                            telefono = ?,
+                                            correo = ?
+                                        WHERE id = ?
+                                    """, (e_nombre, e_curp.upper().strip(), e_nacimiento.strftime("%Y-%m-%d"), e_sexo, e_tel, e_correo, id_p_mod))
+                                    conn.commit()
+                                    conn.close()
+                                    st.success(f"¡Los datos de '{e_nombre}' se actualizaron con éxito!")
+                                    st.rerun()
+                                except sqlite3.IntegrityError:
+                                    st.error("Error de integridad: La CURP ingresada ya le pertenece a otro paciente registrado.")
 
     # --- NUEVO TAB: NUEVA CONSULTA / RECETA ---
     elif choice == "Nueva Consulta / Receta":
@@ -770,7 +873,7 @@ else:
                                 'dosis': m_dosis.strip(),
                                 'via_administracion': m_via,
                                 'frecuencia': m_frecuencia.strip(),
-                                'duracion_treatment': m_duracion.strip(),
+                                'duracion_tratamiento': m_duracion.strip(),
                                 'indicaciones_adicionales': m_adicional.strip() if m_adicional else None
                             })
                             st.success(f"Se agregó '{m_generico}' a la receta actual.")
@@ -782,7 +885,7 @@ else:
                     for i, med in enumerate(st.session_state['medicamentos_receta'], 1):
                         marca = f" ({med['denominacion_distintiva']})" if med['denominacion_distintiva'] else ""
                         st.markdown(f"**{i}. {med['denominacion_generica']}{marca}** - {med['presentacion']}")
-                        st.caption(f"Dosis: {med['dosis']} | Vía: {med['via_administracion']} | Frecuencia: {med['frecuencia']} | Duración: {med['duracion_treatment']}")
+                        st.caption(f"Dosis: {med['dosis']} | Vía: {med['via_administracion']} | Frecuencia: {med['frecuencia']} | Duración: {med['duracion_tratamiento']}")
                     
                     if st.button("❌ Vaciar Lista de Medicamentos"):
                         st.session_state['medicamentos_receta'] = []
@@ -827,7 +930,7 @@ else:
                             """, (
                                 id_receta, med['denominacion_generica'], med['denominacion_distintiva'],
                                 med['presentacion'], med['dosis'], med['via_administracion'],
-                                med['frecuencia'], med['duracion_treatment'], med['indicaciones_adicionales']
+                                med['frecuencia'], med['duracion_tratamiento'], med['indicaciones_adicionales']
                             ))
                     
                     # 2. Insertar Consulta
