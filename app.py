@@ -546,8 +546,8 @@ else:
             st.write("Protege el acceso a tus recetas y expedientes clínicos (Art. 71 Septies LGS).")
             with st.form("password_change_form"):
                 current_pw = st.text_input("Contraseña Actual", type="password")
-                new_pw = st.password_input("Nueva Contraseña", type="password")
-                confirm_pw = st.password_input("Confirmar Nueva Contraseña", type="password")
+                new_pw = st.text_input("Nueva Contraseña", type="password")
+                confirm_pw = st.text_input("Confirmar Nueva Contraseña", type="password")
                 
                 submit_pw = st.form_submit_button("Actualizar Contraseña")
                 
