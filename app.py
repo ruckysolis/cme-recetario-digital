@@ -156,20 +156,18 @@ def init_db():
         """)
         id_medico = cursor.lastrowid
         
-        # Lee la contraseña de forma segura desde los secretos de Streamlit
-pw_plain = st.secrets["passwords"]["doctora"]
-
-# Genera el hash SHA-256
-pw_hash = hashlib.sha256(pw_plain.encode("utf-8")).hexdigest()
-
-# Inserta en la base de datos
-cursor.execute(
-    """
-    INSERT INTO usuarios (username, password_hash, id_medico)
-    VALUES ('doctora', ?, ?)
-""",
-    (pw_hash, id_medico),
-)
+        # ✅ CORRECTO: Indentado dentro del bloque if
+        try:
+            pw_plain = st.secrets["passwords"]["doctora"]
+        except Exception:
+            pw_plain = "doctora123" # Fallback temporal por seguridad si falta el secreto en la nube
+            
+        pw_hash = hashlib.sha256(pw_plain.encode("utf-8")).hexdigest()
+        
+        cursor.execute("""
+            INSERT INTO usuarios (username, password_hash, id_medico)
+            VALUES ('doctora', ?, ?)
+        """, (pw_hash, id_medico))
         
     conn.commit()
     conn.close()
