@@ -465,7 +465,7 @@ if not st.session_state['logged_in']:
                     else:
                         st.error("Usuario o contraseña incorrectos.")
                         
-        st.info("ℹ️ **Prototipo local:** El usuario predeterminado de tu esposa es **`doctora`** y la contraseña es **`doctora123`**. Ella podrá modificar estos datos dentro del sistema.")
+        st.info("ℹ️ **Aviso:** Para consultas y recetas consulte a su medico.")
 else:
     # --- 5. INTERFAZ DE LA PLATAFORMA ---
     user_info = st.session_state['user_info']
