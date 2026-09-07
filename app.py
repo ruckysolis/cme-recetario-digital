@@ -912,15 +912,15 @@ else:
                     
                     # 🟢 AQUÍ ES DONDE COLOCAS LA ZONA HORARIA Y LA FECHA:
                     tz_fronteriza = ZoneInfo("America/Matamoros")
-                    fecha_hoy = datetime.now(tz_fronteriza).strftime("%Y-%m-%d %H:%M")
+                    # Agregamos datetime. antes de now()
+                    fecha_hoy = datetime.datetime.now(tz_fronteriza).strftime("%Y-%m-%d %H:%M")
                     
                     id_receta = None
                     
-                    # 1. Si lleva receta, la registramos primero
                     if generar_receta and st.session_state['medicamentos_receta']:
-                        # Generar Folio Único usando la misma zona horaria fronteriza
                         random_suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
-                        folio = f"REC-{datetime.now(tz_fronteriza).strftime('%Y%m%d')}-{random_suffix}"
+                        # Igual aquí agregamos datetime. antes de now()
+                        folio = f"REC-{datetime.datetime.now(tz_fronteriza).strftime('%Y%m%d')}-{random_suffix}"
                         
                         cursor.execute("""
                         INSERT INTO recetas (id_medico, id_paciente, fecha_emision, folio)
