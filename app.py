@@ -909,15 +909,18 @@ else:
                 else:
                     conn = get_db_connection()
                     cursor = conn.cursor()
-                    hora_mexico = datetime.datetime.utcnow() - datetime.timedelta(hours=6)
-                    fecha_hoy = hora_mexico.strftime("%Y-%m-%d %H:%M")
+                    
+                    # 🟢 AQUÍ ES DONDE COLOCAS LA ZONA HORARIA Y LA FECHA:
+                    tz_fronteriza = ZoneInfo("America/Matamoros")
+                    fecha_hoy = datetime.now(tz_fronteriza).strftime("%Y-%m-%d %H:%M")
+                    
                     id_receta = None
                     
                     # 1. Si lleva receta, la registramos primero
                     if generar_receta and st.session_state['medicamentos_receta']:
-                        # Generar Folio Único
+                        # Generar Folio Único usando la misma zona horaria fronteriza
                         random_suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
-                        folio = f"REC-{hora_mexico.strftime('%Y%m%d')}-{random_suffix}"
+                        folio = f"REC-{datetime.now(tz_fronteriza).strftime('%Y%m%d')}-{random_suffix}"
                         
                         cursor.execute("""
                         INSERT INTO recetas (id_medico, id_paciente, fecha_emision, folio)
